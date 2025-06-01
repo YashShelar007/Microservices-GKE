@@ -1,0 +1,53 @@
+# microservices-gke/cloudbuild.yaml
+
+steps:
+  # 1. Build & push user-service image
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/user-service:$SHORT_SHA"
+      - "./user-service"
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/user-service:$SHORT_SHA"
+
+  # 2. Build & push order-service image
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/order-service:$SHORT_SHA"
+      - "./order-service"
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/order-service:$SHORT_SHA"
+
+  # 3. Update Kubernetes deployments on GKE
+  - name: "gcr.io/cloud-builders/kubectl"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        # Authenticate kubectl to GKE using the custom substitutions:
+        gcloud container clusters get-credentials $_CLUSTER_NAME --zone $_ZONE --project $PROJECT_ID
+
+        # Replace the old :v1 tag in both Deployment YAMLs with the new $SHORT_SHA
+        sed -i "s|gcr.io/$PROJECT_ID/user-service:v1|gcr.io/$PROJECT_ID/user-service:$SHORT_SHA|g" k8s/user-deployment.yaml
+        sed -i "s|gcr.io/$PROJECT_ID/order-service:v1|gcr.io/$PROJECT_ID/order-service:$SHORT_SHA|g" k8s/order-deployment.yaml
+
+        # Apply the updated Deployments
+        kubectl apply -f k8s/user-deployment.yaml
+        kubectl apply -f k8s/order-deployment.yaml
+
+# Let Cloud Build know about the images being built:
+images:
+  - "gcr.io/$PROJECT_ID/user-service:$SHORT_SHA"
+  - "gcr.io/$PROJECT_ID/order-service:$SHORT_SHA"
+
+# Custom substitutions (must start with an underscore)
+substitutions:
+  _CLUSTER_NAME: "microservices-cluster"
+  _ZONE: "us-central1-a"
